@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   Battery,
   CalendarDays,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Home,
@@ -51,6 +52,7 @@ function App() {
   const [activeTab, setActiveTab] = useState('home');
   const [screen, setScreen] = useState({ name: 'tab' });
   const [purchasePrefill, setPurchasePrefill] = useState({});
+  const [homeMonth, setHomeMonth] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(activities));
@@ -66,6 +68,18 @@ function App() {
   const selectedAsset = screen.assetId ? assets.find((asset) => asset.id === screen.assetId) : null;
 
   function goHome() {
+    setActiveTab('home');
+    setScreen({ name: 'tab' });
+  }
+
+  function resetToFirstRunHome() {
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(MANUAL_ASSETS_KEY);
+    localStorage.removeItem(OLD_STORAGE_KEY);
+    setActivities([]);
+    setManualAssets([]);
+    setPurchasePrefill({});
+    setHomeMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
     setActiveTab('home');
     setScreen({ name: 'tab' });
   }
@@ -90,7 +104,10 @@ function App() {
       updatedAt: now,
     };
     setActivities((current) => [activity, ...current]);
-    setScreen({ name: 'detail', activityId: activity.id, source: 'home' });
+    const activityDate = parseDateValue(activity.date);
+    setHomeMonth(activityDate ? new Date(activityDate.getFullYear(), activityDate.getMonth(), 1) : new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+    setActiveTab('home');
+    setScreen({ name: 'tab' });
   }
 
   function updateActivity(activityId, draft) {
@@ -348,13 +365,23 @@ function App() {
   }
 
   if (activities.length === 0) {
-    return <EmptyHome onCreate={() => setScreen({ name: 'create' })} />;
+    return (
+      <PhoneCanvas bottomAction={<BottomTabs activeTab={activeTab} onChange={setActiveTab} />}>
+        <StatusBar />
+        {activeTab === 'home' && <EmptyHome selectedMonth={homeMonth} onMonthSelect={setHomeMonth} onCreate={() => setScreen({ name: 'create' })} onOpenActivities={() => setActiveTab('activities')} />}
+        {activeTab === 'activities' && <ActivitiesTab activities={activities} onOpenActivity={(id) => openDetail(id, 'activities')} />}
+        {activeTab === 'assets' && <AssetsTab assets={assets} onAddAsset={() => setScreen({ name: 'addAsset' })} onEditAsset={(assetId) => setScreen({ name: 'editAsset', assetId })} />}
+      </PhoneCanvas>
+    );
   }
 
   return (
-    <PhoneCanvas bottomAction={<BottomTabs activeTab={activeTab} onChange={setActiveTab} />}>
+    <PhoneCanvas
+      bottomAction={<BottomTabs activeTab={activeTab} onChange={setActiveTab} />}
+      overlayAction={<ResetHomeShortcut onClick={resetToFirstRunHome} />}
+    >
       <StatusBar />
-      {activeTab === 'home' && <HomeDashboard activities={activities} assets={assets} onCreate={() => setScreen({ name: 'create' })} onOpenActivity={(id) => openDetail(id, 'home')} onOpenAssets={() => setActiveTab('assets')} />}
+      {activeTab === 'home' && <HomeDashboard activities={activities} assets={assets} selectedMonth={homeMonth} onMonthSelect={setHomeMonth} onCreate={() => setScreen({ name: 'create' })} onOpenActivity={(id) => openDetail(id, 'home')} onOpenActivities={() => setActiveTab('activities')} onOpenAssets={() => setActiveTab('assets')} />}
       {activeTab === 'activities' && <ActivitiesTab activities={activities} onOpenActivity={(id) => openDetail(id, 'activities')} />}
       {activeTab === 'assets' && <AssetsTab assets={assets} onAddAsset={() => setScreen({ name: 'addAsset' })} onEditAsset={(assetId) => setScreen({ name: 'editAsset', assetId })} />}
     </PhoneCanvas>
@@ -600,11 +627,16 @@ function daysUntilActivity(dateValue) {
   return Math.max(0, Math.ceil((start - current) / 86400000));
 }
 
-function PhoneCanvas({ children, bottomAction }) {
+function PhoneCanvas({ children, bottomAction, overlayAction }) {
   return (
     <main className="min-h-screen bg-[#F7F8FA] text-[#080d2b]">
       <div className="relative mx-auto min-h-screen w-full max-w-[390px] overflow-hidden bg-[#F7F8FA] pb-32 shadow-[0_24px_80px_rgba(91,110,148,0.16)]">
         {children}
+        {overlayAction && (
+          <div className="pointer-events-none fixed left-1/2 top-16 z-50 flex w-full max-w-[390px] -translate-x-1/2 justify-end px-4">
+            <div className="pointer-events-auto">{overlayAction}</div>
+          </div>
+        )}
         {bottomAction && <div className="fixed bottom-3 left-1/2 z-50 w-full max-w-[390px] -translate-x-1/2 px-4">{bottomAction}</div>}
       </div>
     </main>
@@ -612,14 +644,92 @@ function PhoneCanvas({ children, bottomAction }) {
 }
 
 function StatusBar() {
+  const [time, setTime] = useState(formatStatusTime);
+  const [online, setOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine));
+  const [battery, setBattery] = useState(null);
+
+  useEffect(() => {
+    const updateTime = () => setTime(formatStatusTime());
+    updateTime();
+    const timer = window.setInterval(updateTime, 30000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const handleOnline = () => setOnline(true);
+    const handleOffline = () => setOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  useEffect(() => {
+    let batteryManager;
+    let cancelled = false;
+    let updateBattery;
+
+    async function readBattery() {
+      if (!navigator.getBattery) return;
+      batteryManager = await navigator.getBattery();
+      updateBattery = () => {
+        if (cancelled) return;
+        setBattery({
+          charging: batteryManager.charging,
+          level: Math.round(batteryManager.level * 100),
+        });
+      };
+      updateBattery();
+      batteryManager.addEventListener('levelchange', updateBattery);
+      batteryManager.addEventListener('chargingchange', updateBattery);
+    }
+
+    readBattery().catch(() => setBattery(null));
+    return () => {
+      cancelled = true;
+      if (!batteryManager || !updateBattery) return;
+      batteryManager.removeEventListener('levelchange', updateBattery);
+      batteryManager.removeEventListener('chargingchange', updateBattery);
+    };
+  }, []);
+
   return (
     <div className="flex h-12 items-center justify-between px-[31px] pt-2 text-[15px] font-bold text-black">
-      <span>9:41</span>
-      <div className="flex items-center gap-1.5">
+      <span>{time}</span>
+      <div className={`flex items-center gap-1.5 ${online ? 'text-black' : 'text-[#9aa1b3]'}`}>
         <SignalIcon />
         <Wifi size={16} strokeWidth={3} />
-        <Battery size={24} strokeWidth={2.2} />
+        <BatteryIndicator battery={battery} />
       </div>
+    </div>
+  );
+}
+
+function formatStatusTime(date = new Date()) {
+  return date.toLocaleTimeString('zh-CN', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
+
+function BatteryIndicator({ battery }) {
+  if (!battery) {
+    return <Battery size={24} strokeWidth={2.2} aria-label="电池状态" />;
+  }
+
+  return (
+    <div className="flex items-center gap-0.5" aria-label={`电量 ${battery.level}%${battery.charging ? '，正在充电' : ''}`}>
+      <div className="relative h-[12px] w-[24px] rounded-[4px] border-[1.8px] border-current px-[1.5px] py-[1.5px]">
+        <span
+          className={`block h-full rounded-[2px] ${battery.level <= 20 && !battery.charging ? 'bg-orange-500' : 'bg-current'}`}
+          style={{ width: `${Math.max(8, battery.level)}%` }}
+        />
+      </div>
+      <span className="h-[5px] w-[2px] rounded-r-full bg-current" />
+      {battery.charging && <span className="-ml-0.5 text-[9px] leading-none">⚡</span>}
     </div>
   );
 }
@@ -634,95 +744,172 @@ function SignalIcon() {
   );
 }
 
-function EmptyHome({ onCreate }) {
-  return (
-    <PhoneCanvas>
-      <StatusBar />
-      <section className="px-7 pt-8">
-        <h1 className="text-[34px] font-black leading-none tracking-[-0.05em]">活动账本</h1>
-        <p className="mt-3 max-w-[250px] text-[15px] font-medium leading-6 text-[#747b91]">帮你算清每一场活动赚了多少钱</p>
-      </section>
-
-      <section className="mx-5 mt-24 rounded-[30px] bg-white/86 px-5 py-12 text-center shadow-[0_18px_48px_rgba(82,98,135,0.12)] backdrop-blur-2xl">
-        <button
-          className="group relative mx-auto grid h-[88px] w-[88px] place-items-center rounded-full bg-[radial-gradient(circle_at_35%_25%,#ffffff_0%,#f7f8ff_58%,#eef2ff_100%)] text-[#5b5df7] shadow-[0_14px_30px_rgba(91,93,247,0.12),0_4px_12px_rgba(109,120,170,0.06),inset_0_1px_0_rgba(255,255,255,0.95)] ring-1 ring-white/80 transition active:scale-[0.98]"
-          onClick={onCreate}
-          aria-label="创建第一场活动"
-        >
-          <span className="absolute -inset-2 rounded-full bg-[#6864ff]/5 blur-2xl transition group-active:bg-[#6864ff]/8" />
-          <Plus className="relative z-10" size={34} strokeWidth={2.6} />
-        </button>
-        <button className="mt-6 text-[22px] font-black tracking-[-0.045em] text-[#151a38]" onClick={onCreate}>
-          创建第一场活动
-        </button>
-      </section>
-      <FloatingCreateButton onClick={onCreate} />
-    </PhoneCanvas>
-  );
-}
-
-function HomeDashboard({ activities, assets, onCreate, onOpenActivity, onOpenAssets }) {
-  const [selectedMonth, setSelectedMonth] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
-  const summary = getMonthlySummary(activities, selectedMonth);
-  const activeActivities = activities.filter((activity) => ['preparing', 'active'].includes(activity.status) && !isActivityPast(activity));
-  const assetValue = assets.reduce((sum, asset) => sum + (Number(asset.amount) || 0), 0);
-  const hasMonthData = summary.activityCount > 0 || summary.income > 0 || summary.cost > 0;
+function EmptyHome({ selectedMonth, onMonthSelect, onCreate, onOpenActivities }) {
+  const [monthPickerOpen, setMonthPickerOpen] = useState(false);
+  const summary = getMonthlySummary([], selectedMonth);
 
   return (
     <>
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-[520px] overflow-hidden">
-        <div className="absolute -left-20 top-20 h-56 w-56 rounded-full bg-[#cfefff]/35 blur-3xl" />
-        <div className="absolute -right-24 top-44 h-64 w-64 rounded-full bg-[#d8ffe9]/35 blur-3xl" />
-        <div className="absolute left-28 top-8 h-40 w-40 rounded-full bg-[#ecebff]/30 blur-3xl" />
-      </div>
-      <section className="relative px-5 pt-4">
-        <div className="pointer-events-none absolute right-8 top-9 text-[30px] text-[#6f75ff] opacity-[0.07]">🧾</div>
-        <div className="pointer-events-none absolute right-24 top-20 text-[26px] text-[#6f75ff] opacity-[0.06]">🛍️</div>
-        <h1 className="text-[31px] font-black leading-none tracking-[-0.05em]">活动账本</h1>
+      <section className="px-7 pt-8">
+        <h1 className="text-[31px] font-black leading-none text-[#080d2b]">活动经营账本</h1>
       </section>
 
-      <section className="relative z-30 isolate mx-5 mt-5 overflow-hidden rounded-[32px] bg-[linear-gradient(145deg,#ffffff_0%,#f3fff9_44%,#edf6ff_100%)] p-5 shadow-[0_24px_60px_rgba(67,91,127,0.18),inset_0_1px_0_rgba(255,255,255,0.9)] ring-1 ring-white/70 backdrop-blur-2xl">
-        <div className="absolute inset-0 overflow-hidden rounded-[32px]">
-          <div className="pointer-events-none absolute -right-12 -top-10 h-40 w-40 rounded-full bg-emerald-300/20 blur-2xl" />
-          <div className="pointer-events-none absolute -bottom-16 left-8 h-36 w-36 rounded-full bg-[#6f75ff]/10 blur-2xl" />
-          <div className="pointer-events-none absolute right-5 top-5 grid h-14 w-14 place-items-center rounded-[18px] bg-white/35 text-[28px] opacity-[0.08] shadow-inner">💳</div>
-        </div>
-        <svg className="pointer-events-none absolute bottom-7 right-4 h-20 w-36 opacity-[0.13]" viewBox="0 0 160 88" fill="none" aria-hidden="true">
-          <path d="M4 70C26 60 34 34 57 42C80 50 84 22 108 28C128 33 132 18 156 12" stroke="#34C77B" strokeWidth="7" strokeLinecap="round" />
-          <path d="M4 72C26 62 34 36 57 44C80 52 84 24 108 30C128 35 132 20 156 14" stroke="white" strokeWidth="2" strokeLinecap="round" />
-        </svg>
-        <div className="relative z-10 flex items-center justify-between gap-3">
-          <p className="text-[14px] font-black text-[#747b91]">经营表现</p>
-          <div className="inline-flex items-center gap-1 rounded-full bg-white/74 p-1 shadow-sm ring-1 ring-white/70">
-            <button className="grid h-8 w-8 place-items-center rounded-full text-[#5b5df7] transition active:scale-95" onClick={() => setSelectedMonth((current) => shiftMonth(current, -1))} aria-label="上个月">
-              <ChevronLeft size={17} strokeWidth={2.8} />
-            </button>
-            <span className="min-w-[84px] text-center text-[13px] font-black text-[#151a38]">{formatMonth(selectedMonth)}</span>
-            <button className="grid h-8 w-8 place-items-center rounded-full text-[#5b5df7] transition active:scale-95" onClick={() => setSelectedMonth((current) => shiftMonth(current, 1))} aria-label="下个月">
-              <ChevronRight size={17} strokeWidth={2.8} />
-            </button>
-          </div>
-        </div>
-        {hasMonthData ? (
-          <>
-            <p className="relative z-10 mt-5 text-[42px] font-black leading-none tracking-[-0.065em] text-emerald-700">赚了 {money(summary.profit)}</p>
-            <p className="relative z-10 mt-3 text-[13px] font-semibold leading-5 text-[#747b91]">
-              {summary.activityCount} 场活动 · 收入 {money(summary.income)} · 成本 {money(summary.cost)}
-            </p>
-            <p className="relative z-10 mt-1 text-[12px] font-semibold text-[#8b93a6]">利润率 {summary.margin}</p>
-          </>
-        ) : (
-          <div className="relative z-10 mt-5 rounded-[24px] bg-white/70 p-4 shadow-sm ring-1 ring-white/70">
-            <p className="text-[18px] font-black tracking-[-0.04em] text-[#151a38]">{formatMonth(selectedMonth)}暂无经营数据</p>
-            <p className="mt-2 text-[13px] font-semibold text-[#747b91]">这个月还没有活动记录</p>
-          </div>
-        )}
-      </section>
+      <MonthlyOverviewCard
+        month={formatMonth(selectedMonth)}
+        income={summary.income}
+        cost={summary.cost}
+        profit={summary.profit}
+        onMonthClick={() => setMonthPickerOpen(true)}
+      />
 
       <section className="mt-6">
-        <div className="mb-3 flex items-center justify-between px-5">
+        <button className="mb-1 flex w-full items-center gap-1 px-9 text-left" onClick={onOpenActivities}>
           <h2 className="text-[20px] font-black tracking-[-0.04em]">进行中的活动</h2>
+          <ChevronRight size={17} className="text-[#aeb4c3]" strokeWidth={2.5} />
+        </button>
+
+        <div className="flex min-h-[230px] items-center justify-center px-8 pb-8 pt-2 text-center">
+          <div>
+            <p className="text-[14px] font-semibold text-[#b1acd8]">还没有记录</p>
+            <p className="mt-1 text-[14px] font-semibold text-[#b1acd8]">开始创建你的第一场活动吧～</p>
+          </div>
         </div>
+      </section>
+      <FloatingCreateButton onClick={onCreate} />
+      {monthPickerOpen && (
+        <MonthPickerSheet
+          activities={[]}
+          selectedMonth={selectedMonth}
+          onSelect={(month) => {
+            onMonthSelect(month);
+            setMonthPickerOpen(false);
+          }}
+          onCancel={() => setMonthPickerOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
+function MonthlyOverviewCard({ month, income, cost, profit, onMonthClick }) {
+  const profitTone = profit > 0 ? 'text-[#087A52]' : 'text-[#7F7AA8]';
+
+  return (
+    <section className="relative mx-6 mt-6 min-h-[200px] overflow-hidden rounded-[32px] border border-white/80 bg-[radial-gradient(circle_at_12%_12%,rgba(234,248,241,0.95),transparent_36%),radial-gradient(circle_at_88%_76%,rgba(238,240,255,0.95),transparent_42%),linear-gradient(135deg,#F9FFFC_0%,#F7FAFF_50%,#F3F2FF_100%)] px-6 pb-5 pt-5 shadow-[0_22px_60px_rgba(15,23,42,0.06)]">
+      <div className="pointer-events-none absolute left-8 top-8 h-1.5 w-1.5 rounded-full bg-[#8E8AFB]/35" />
+      <div className="pointer-events-none absolute right-28 top-24 h-1 w-1 rounded-full bg-[#087A52]/20" />
+      <div className="relative z-10">
+        <div className="min-w-0">
+          <button className="inline-flex items-center gap-2 rounded-full border border-white/85 bg-white/68 px-[18px] py-2.5 text-[14px] font-black text-[#111827] shadow-[0_10px_24px_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.92)] transition active:scale-[0.98]" type="button" onClick={onMonthClick}>
+            {month}
+            <ChevronDown size={14} className="text-[#9CA3AF]" strokeWidth={2.4} />
+          </button>
+          <p className="mt-7 text-[15px] font-black tracking-[-0.02em] text-[#7B8497]">本月利润</p>
+          <p className={`mt-2 text-[50px] font-black leading-[0.9] tracking-[-0.075em] ${profitTone}`}>{money(profit)}</p>
+        </div>
+      </div>
+      <div className="relative z-10 mt-5 grid h-12 grid-cols-3 items-center rounded-full border border-white/80 bg-white/68 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
+        <span className="text-[12px] font-black text-[#8A93A8]">收入 <span className="text-[14px] text-[#0B123F]">{money(income)}</span></span>
+        <span className="border-x border-[rgba(148,163,184,0.22)] text-[12px] font-black text-[#8A93A8]">成本 <span className="text-[14px] text-[#0B123F]">{money(cost)}</span></span>
+        <span className="text-[12px] font-black text-[#8A93A8]">利润 <span className="text-[14px] text-[#5B5CF6]">{money(profit)}</span></span>
+      </div>
+    </section>
+  );
+}
+
+function MonthPickerSheet({ activities, selectedMonth, onSelect, onCancel }) {
+  const [visibleYear, setVisibleYear] = useState(selectedMonth.getFullYear());
+  const monthItems = Array.from({ length: 12 }, (_, index) => {
+    const date = new Date(visibleYear, index, 1);
+    const summary = getMonthlySummary(activities, date);
+    const hasData = summary.activityCount > 0 || summary.income !== 0 || summary.cost !== 0 || summary.profit !== 0;
+    return {
+      date,
+      hasData,
+      key: `${visibleYear}-${String(index + 1).padStart(2, '0')}`,
+      label: `${index + 1}月`,
+      profit: summary.profit,
+    };
+  });
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-end bg-[rgba(15,23,42,0.16)] px-4 pb-5" onClick={onCancel}>
+      <div className="w-full overflow-hidden rounded-[30px] bg-white/92 px-6 pb-7 pt-3 shadow-[0_18px_50px_rgba(35,43,73,0.12)] ring-1 ring-white/70 backdrop-blur-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="mx-auto h-1.5 w-10 rounded-full bg-[#d9deea]" />
+        <h2 className="pb-4 pt-4 text-center text-[18px] font-black tracking-[-0.035em] text-[#111827]">选择月份</h2>
+        <div className="mb-5 flex h-12 items-center justify-between rounded-full bg-[#F5F6FA] px-1 ring-1 ring-[#edf0f6]">
+          <button className="grid h-10 w-10 place-items-center rounded-full text-[#635BFF] transition active:scale-95" onClick={() => setVisibleYear((year) => year - 1)} aria-label="上一年">
+            <ChevronLeft size={18} strokeWidth={2.6} />
+          </button>
+          <span className="text-[15px] font-black text-[#111827]">{visibleYear}年</span>
+          <button className="grid h-10 w-10 place-items-center rounded-full text-[#635BFF] transition active:scale-95" onClick={() => setVisibleYear((year) => year + 1)} aria-label="下一年">
+            <ChevronRight size={18} strokeWidth={2.6} />
+          </button>
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          {monthItems.map((item) => {
+            const selected = selectedMonth.getFullYear() === item.date.getFullYear() && selectedMonth.getMonth() === item.date.getMonth();
+            return (
+              <button
+                key={item.key}
+                className={`min-h-[60px] rounded-[19px] border px-3 py-2.5 text-center transition active:scale-[0.98] ${
+                  selected
+                    ? 'border-[#B9B8FF] bg-[#EEF0FF] text-[#635BFF] shadow-[0_8px_20px_rgba(99,91,255,0.08)]'
+                    : 'border-transparent bg-[#F7F8FA]/70 text-[#6B7280]'
+                }`}
+                onClick={() => onSelect(item.date)}
+              >
+                <span className="block text-[15px] font-semibold">{item.label}</span>
+                {item.hasData && <span className="mt-1 block text-[12px] font-semibold text-[#635BFF]">利润 {money(item.profit)}</span>}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ResetHomeShortcut({ onClick, compact = false }) {
+  return (
+    <button
+      type="button"
+      className={`flex items-center gap-1.5 rounded-full bg-[#151a38]/88 font-black text-white shadow-[0_12px_28px_rgba(31,41,55,0.18)] ring-1 ring-white/20 backdrop-blur-2xl transition active:scale-[0.97] ${
+        compact ? 'px-3 py-2 text-[11px]' : 'px-3.5 py-2.5 text-[12px]'
+      }`}
+      onClick={onClick}
+      aria-label="重置并回到最原始首页"
+    >
+      <Home size={compact ? 13 : 14} strokeWidth={2.7} />
+      重置首页
+    </button>
+  );
+}
+
+function HomeDashboard({ activities, assets, selectedMonth, onMonthSelect, onCreate, onOpenActivity, onOpenActivities, onOpenAssets }) {
+  const [monthPickerOpen, setMonthPickerOpen] = useState(false);
+  const summary = getMonthlySummary(activities, selectedMonth);
+  const activeActivities = activities.filter((activity) => ['preparing', 'active'].includes(activity.status) && !isActivityPast(activity));
+
+  return (
+    <>
+      <section className="px-7 pt-8">
+        <h1 className="text-[31px] font-black leading-none text-[#080d2b]">活动经营账本</h1>
+      </section>
+
+      <MonthlyOverviewCard
+        month={formatMonth(selectedMonth)}
+        income={summary.income}
+        cost={summary.cost}
+        profit={summary.profit}
+        onMonthClick={() => setMonthPickerOpen(true)}
+      />
+
+      <section className="mt-6">
+        <button className="mb-1 flex w-full items-center gap-1 px-9 text-left" onClick={onOpenActivities}>
+          <h2 className="text-[20px] font-black tracking-[-0.04em]">进行中的活动</h2>
+          <ChevronRight size={17} className="text-[#aeb4c3]" strokeWidth={2.5} />
+        </button>
         {activeActivities.length > 0 ? (
           <div className="space-y-3 px-5">
             {activeActivities.map((activity) => (
@@ -730,31 +917,21 @@ function HomeDashboard({ activities, assets, onCreate, onOpenActivity, onOpenAss
             ))}
           </div>
         ) : (
-          <div className="mx-5 flex min-h-[122px] items-center gap-4 rounded-[26px] bg-white/92 p-4 shadow-[0_14px_34px_rgba(82,98,135,0.14)] ring-1 ring-[#edf1f7] backdrop-blur-2xl">
-            <div className="relative grid h-[60px] w-[60px] shrink-0 place-items-center rounded-[22px] bg-[#eef2ff] text-[#5b5df7] shadow-[0_8px_18px_rgba(91,93,247,0.1)]">
-              <div className="grid h-10 w-10 place-items-center rounded-[14px] bg-white/70">
-                <CalendarDays size={23} strokeWidth={2.5} />
-              </div>
-              <span className="absolute -right-1 -top-1 grid h-5 w-5 place-items-center rounded-full bg-[#5b5df7] text-white shadow-sm">
-                <Plus size={12} strokeWidth={3} />
-              </span>
-            </div>
-            <div className="min-w-0">
-              <h3 className="text-[17px] font-black tracking-[-0.035em] text-[#151a38]">暂时还没有活动</h3>
-              <p className="mt-1 text-[12px] font-semibold leading-5 text-[#687086]">新建后开始记录采购</p>
+          <div className="flex min-h-[230px] items-center justify-center px-8 pb-8 pt-2 text-center">
+            <div>
+              <p className="text-[14px] font-semibold text-[#b1acd8]">还没有记录</p>
+              <p className="mt-1 text-[14px] font-semibold text-[#b1acd8]">开始创建你的第一场活动吧～</p>
             </div>
           </div>
         )}
       </section>
 
-      <section className="mt-6">
+      <section className="mt-6 pb-3">
         <div className="mb-3 flex items-center justify-between px-5">
           <h2 className="text-[20px] font-black tracking-[-0.04em]">可复用资产</h2>
         </div>
         <button className="relative mx-5 block w-[calc(100%-40px)] overflow-hidden rounded-[30px] bg-[linear-gradient(145deg,#ffffff_0%,#f8fbff_60%,#f4fff9_100%)] p-5 text-left shadow-[0_18px_46px_rgba(82,98,135,0.13)] ring-1 ring-white/70 backdrop-blur-2xl transition active:scale-[0.99]" onClick={onOpenAssets}>
-          <div className="pointer-events-none absolute right-5 top-5 text-[30px] opacity-[0.055]">📦</div>
           <ChevronRight size={16} className="absolute right-5 top-5 text-[#b1b7c6]" />
-          <div className="pointer-events-none absolute -right-12 bottom-0 h-32 w-32 rounded-full bg-[#d8ffe9]/35 blur-3xl" />
           {assets.length ? (
             <div className="grid grid-cols-3 gap-2">
               {assets.slice(0, 3).map((asset) => (
@@ -763,18 +940,25 @@ function HomeDashboard({ activities, assets, onCreate, onOpenActivity, onOpenAss
             </div>
           ) : (
             <div className="rounded-[24px] bg-[#f6f8fb]/90 p-4">
-              <div className="mb-3 flex gap-2">
-                {['⛺', '💡', '🪑'].map((item) => (
-                  <span key={item} className="grid h-11 w-11 place-items-center rounded-[16px] bg-white/80 text-[22px] shadow-sm grayscale opacity-60">{item}</span>
-                ))}
-              </div>
-              <p className="text-[16px] font-black tracking-[-0.03em] text-[#151a38]">暂未沉淀可复用物资</p>
-              <p className="mt-2 text-[13px] font-semibold leading-5 text-[#747b91]">标记“可复用”，下次直接继续用</p>
+              <p className="text-[16px] font-black tracking-[-0.03em] text-[#151a38]">暂无可复用物资</p>
+              <p className="mt-2 text-[13px] font-semibold leading-5 text-[#747b91]">采购时标记“可复用”，下次活动可以继续用。</p>
             </div>
           )}
         </button>
       </section>
+
       <FloatingCreateButton onClick={onCreate} />
+      {monthPickerOpen && (
+        <MonthPickerSheet
+          activities={activities}
+          selectedMonth={selectedMonth}
+          onSelect={(month) => {
+            onMonthSelect(month);
+            setMonthPickerOpen(false);
+          }}
+          onCancel={() => setMonthPickerOpen(false)}
+        />
+      )}
     </>
   );
 }
@@ -1665,12 +1849,12 @@ function BottomTabs({ activeTab, onChange }) {
   ];
 
   return (
-    <nav className="mx-auto grid h-[72px] w-[334px] grid-cols-3 rounded-full border border-white/70 bg-white/34 px-2 py-2 shadow-[0_8px_26px_rgba(31,41,55,0.08),0_2px_8px_rgba(31,41,55,0.045),inset_0_1px_0_rgba(255,255,255,0.96),inset_0_-1px_0_rgba(255,255,255,0.42)] backdrop-blur-[34px] [backdrop-filter:blur(34px)_saturate(2.25)] [-webkit-backdrop-filter:blur(34px)_saturate(2.25)]">
+    <nav className="mx-auto grid h-[76px] w-full max-w-[350px] grid-cols-3 rounded-full border border-white/70 bg-white/42 px-2.5 py-2.5 shadow-[0_16px_36px_rgba(31,41,55,0.09),0_2px_8px_rgba(31,41,55,0.04),inset_0_1px_0_rgba(255,255,255,0.98)] backdrop-blur-[34px] [backdrop-filter:blur(34px)_saturate(2.1)] [-webkit-backdrop-filter:blur(34px)_saturate(2.1)]">
       {tabs.map((tab) => {
         const Icon = tab.icon;
         const selected = activeTab === tab.id;
         return (
-          <button key={tab.id} className={`flex flex-col items-center justify-center gap-0.5 rounded-full text-[11px] font-semibold transition-all duration-200 ease-out ${selected ? 'bg-white/30 text-[#6D35F4] shadow-[inset_0_1px_0_rgba(255,255,255,0.9),inset_0_-1px_0_rgba(255,255,255,0.32),0_5px_14px_rgba(31,41,55,0.07)] ring-1 ring-white/40 backdrop-blur-[20px]' : 'text-[#111827]/72'}`} onClick={() => onChange(tab.id)}>
+          <button key={tab.id} className={`flex flex-col items-center justify-center gap-0.5 rounded-full text-[11px] font-semibold transition-all duration-200 ease-out ${selected ? 'bg-white/58 text-[#6D35F4] shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_8px_18px_rgba(91,92,246,0.08)] ring-1 ring-white/55 backdrop-blur-[20px]' : 'text-[#111827]/76'}`} onClick={() => onChange(tab.id)}>
             <Icon size={22} strokeWidth={selected ? 2.65 : 2.3} />
             {tab.label}
           </button>
@@ -1683,11 +1867,11 @@ function BottomTabs({ activeTab, onChange }) {
 function FloatingCreateButton({ onClick }) {
   return (
     <button
-      className="fixed bottom-[106px] left-1/2 z-40 grid h-[58px] w-[58px] translate-x-[117px] place-items-center rounded-full bg-[#5b5df7] text-white shadow-[0_14px_32px_rgba(91,93,247,0.26),inset_0_1px_0_rgba(255,255,255,0.28)] ring-1 ring-white/30 transition active:scale-[0.96]"
+      className="fixed bottom-[118px] left-1/2 z-40 grid h-[62px] w-[62px] translate-x-[112px] place-items-center rounded-full bg-[#5b5cf6] text-white shadow-[0_16px_34px_rgba(91,92,246,0.3),inset_0_1px_0_rgba(255,255,255,0.3)] ring-1 ring-white/30 transition active:scale-[0.96]"
       onClick={onClick}
       aria-label="创建活动"
     >
-      <Plus size={28} strokeWidth={2.8} />
+      <Plus size={31} strokeWidth={2.8} />
     </button>
   );
 }
