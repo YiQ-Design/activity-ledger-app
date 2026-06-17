@@ -72,18 +72,6 @@ function App() {
     setScreen({ name: 'tab' });
   }
 
-  function resetToFirstRunHome() {
-    localStorage.removeItem(STORAGE_KEY);
-    localStorage.removeItem(MANUAL_ASSETS_KEY);
-    localStorage.removeItem(OLD_STORAGE_KEY);
-    setActivities([]);
-    setManualAssets([]);
-    setPurchasePrefill({});
-    setHomeMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
-    setActiveTab('home');
-    setScreen({ name: 'tab' });
-  }
-
   function openDetail(activityId, source = activeTab) {
     setScreen({ name: 'detail', activityId, source });
   }
@@ -367,7 +355,6 @@ function App() {
   if (activities.length === 0) {
     return (
       <PhoneCanvas bottomAction={<BottomTabs activeTab={activeTab} onChange={setActiveTab} />}>
-        <StatusBar />
         {activeTab === 'home' && <EmptyHome selectedMonth={homeMonth} onMonthSelect={setHomeMonth} onCreate={() => setScreen({ name: 'create' })} onOpenActivities={() => setActiveTab('activities')} />}
         {activeTab === 'activities' && <ActivitiesTab activities={activities} onOpenActivity={(id) => openDetail(id, 'activities')} />}
         {activeTab === 'assets' && <AssetsTab assets={assets} onAddAsset={() => setScreen({ name: 'addAsset' })} onEditAsset={(assetId) => setScreen({ name: 'editAsset', assetId })} />}
@@ -376,11 +363,7 @@ function App() {
   }
 
   return (
-    <PhoneCanvas
-      bottomAction={<BottomTabs activeTab={activeTab} onChange={setActiveTab} />}
-      overlayAction={<ResetHomeShortcut onClick={resetToFirstRunHome} />}
-    >
-      <StatusBar />
+    <PhoneCanvas bottomAction={<BottomTabs activeTab={activeTab} onChange={setActiveTab} />}>
       {activeTab === 'home' && <HomeDashboard activities={activities} assets={assets} selectedMonth={homeMonth} onMonthSelect={setHomeMonth} onCreate={() => setScreen({ name: 'create' })} onOpenActivity={(id) => openDetail(id, 'home')} onOpenActivities={() => setActiveTab('activities')} onOpenAssets={() => setActiveTab('assets')} />}
       {activeTab === 'activities' && <ActivitiesTab activities={activities} onOpenActivity={(id) => openDetail(id, 'activities')} />}
       {activeTab === 'assets' && <AssetsTab assets={assets} onAddAsset={() => setScreen({ name: 'addAsset' })} onEditAsset={(assetId) => setScreen({ name: 'editAsset', assetId })} />}
@@ -627,17 +610,18 @@ function daysUntilActivity(dateValue) {
   return Math.max(0, Math.ceil((start - current) / 86400000));
 }
 
-function PhoneCanvas({ children, bottomAction, overlayAction }) {
+function PhoneCanvas({ children, bottomAction }) {
   return (
     <main className="min-h-screen bg-[#F7F8FA] text-[#080d2b]">
-      <div className="relative mx-auto min-h-screen w-full max-w-[390px] overflow-hidden bg-[#F7F8FA] pb-32 shadow-[0_24px_80px_rgba(91,110,148,0.16)]">
+      <div
+        className="relative mx-auto min-h-screen w-full max-w-[390px] overflow-hidden bg-[#F7F8FA] pb-[calc(8rem+env(safe-area-inset-bottom))] shadow-[0_24px_80px_rgba(91,110,148,0.16)]"
+        style={{
+          paddingTop: 'env(safe-area-inset-top)',
+          paddingBottom: 'calc(8rem + env(safe-area-inset-bottom))',
+        }}
+      >
         {children}
-        {overlayAction && (
-          <div className="pointer-events-none fixed left-1/2 top-16 z-50 flex w-full max-w-[390px] -translate-x-1/2 justify-end px-4">
-            <div className="pointer-events-auto">{overlayAction}</div>
-          </div>
-        )}
-        {bottomAction && <div className="fixed bottom-3 left-1/2 z-50 w-full max-w-[390px] -translate-x-1/2 px-4">{bottomAction}</div>}
+        {bottomAction && <div className="fixed bottom-[calc(env(safe-area-inset-bottom)+12px)] left-1/2 z-50 w-full max-w-[390px] -translate-x-1/2 px-4">{bottomAction}</div>}
       </div>
     </main>
   );
@@ -870,22 +854,6 @@ function MonthPickerSheet({ activities, selectedMonth, onSelect, onCancel }) {
   );
 }
 
-function ResetHomeShortcut({ onClick, compact = false }) {
-  return (
-    <button
-      type="button"
-      className={`flex items-center gap-1.5 rounded-full bg-[#151a38]/88 font-black text-white shadow-[0_12px_28px_rgba(31,41,55,0.18)] ring-1 ring-white/20 backdrop-blur-2xl transition active:scale-[0.97] ${
-        compact ? 'px-3 py-2 text-[11px]' : 'px-3.5 py-2.5 text-[12px]'
-      }`}
-      onClick={onClick}
-      aria-label="重置并回到最原始首页"
-    >
-      <Home size={compact ? 13 : 14} strokeWidth={2.7} />
-      重置首页
-    </button>
-  );
-}
-
 function HomeDashboard({ activities, assets, selectedMonth, onMonthSelect, onCreate, onOpenActivity, onOpenActivities, onOpenAssets }) {
   const [monthPickerOpen, setMonthPickerOpen] = useState(false);
   const summary = getMonthlySummary(activities, selectedMonth);
@@ -930,21 +898,20 @@ function HomeDashboard({ activities, assets, selectedMonth, onMonthSelect, onCre
         <div className="mb-3 flex items-center justify-between px-5">
           <h2 className="text-[20px] font-black tracking-[-0.04em]">可复用资产</h2>
         </div>
-        <button className="relative mx-5 block w-[calc(100%-40px)] overflow-hidden rounded-[30px] bg-[linear-gradient(145deg,#ffffff_0%,#f8fbff_60%,#f4fff9_100%)] p-5 text-left shadow-[0_18px_46px_rgba(82,98,135,0.13)] ring-1 ring-white/70 backdrop-blur-2xl transition active:scale-[0.99]" onClick={onOpenAssets}>
-          <ChevronRight size={16} className="absolute right-5 top-5 text-[#b1b7c6]" />
-          {assets.length ? (
+        {assets.length ? (
+          <button className="relative mx-5 block w-[calc(100%-40px)] overflow-hidden rounded-[30px] bg-[linear-gradient(145deg,#ffffff_0%,#f8fbff_60%,#f4fff9_100%)] p-5 text-left shadow-[0_18px_46px_rgba(82,98,135,0.13)] ring-1 ring-white/70 backdrop-blur-2xl transition active:scale-[0.99]" onClick={onOpenAssets}>
+            <ChevronRight size={16} className="absolute right-5 top-5 text-[#b1b7c6]" />
             <div className="grid grid-cols-3 gap-2">
               {assets.slice(0, 3).map((asset) => (
                 <AssetRow key={asset.id} asset={asset} />
               ))}
             </div>
-          ) : (
-            <div className="rounded-[24px] bg-[#f6f8fb]/90 p-4">
-              <p className="text-[16px] font-black tracking-[-0.03em] text-[#151a38]">暂无可复用物资</p>
-              <p className="mt-2 text-[13px] font-semibold leading-5 text-[#747b91]">采购时标记“可复用”，下次活动可以继续用。</p>
-            </div>
-          )}
-        </button>
+          </button>
+        ) : (
+          <div className="flex min-h-[96px] items-center justify-center px-8 text-center">
+            <p className="text-[14px] font-semibold text-[#b1acd8]">暂无可复用资产</p>
+          </div>
+        )}
       </section>
 
       <FloatingCreateButton onClick={onCreate} />
@@ -1284,7 +1251,6 @@ function ActivityForm({ mode, activity, onBack, onSave }) {
 
   return (
     <PhoneCanvas bottomAction={<PrimaryButton disabled={!canSubmit} onClick={saveActivity}>{mode === 'create' ? '创建活动' : '保存修改'}</PrimaryButton>}>
-      <StatusBar />
       <PageHeader title={mode === 'create' ? '创建活动' : '编辑活动'} onBack={handleBack} compact />
       <section className="mx-5 rounded-[30px] bg-white/86 p-5 shadow-[0_18px_44px_rgba(82,98,135,0.12)] backdrop-blur-2xl">
         <p className="text-[13px] font-bold text-[#747b91]">预计总收入</p>
@@ -1351,7 +1317,6 @@ function AssetForm({ mode = 'create', asset, onBack, onSave, onDelete }) {
 
   return (
     <PhoneCanvas bottomAction={<PrimaryButton disabled={!canSave} onClick={() => onSave(draft)}>{mode === 'edit' ? '保存修改' : '保存资产'}</PrimaryButton>}>
-      <StatusBar />
       <PageHeader title={pageTitle} onBack={onBack} />
       <form className="mx-5 space-y-5">
         <section>
@@ -1466,7 +1431,6 @@ function ActivityDetailPage({ activity, onBack, onEdit, onDeleteActivity, onAddP
 
   return (
     <PhoneCanvas>
-      <StatusBar />
       <PageHeader title="活动经营" onBack={onBack} action={<IconButton icon={<MoreHorizontal size={20} />} label="更多操作" onClick={() => setActionsOpen(true)} subtle />} compact />
 
       <section className="relative mx-5 overflow-hidden rounded-[30px] bg-[linear-gradient(145deg,#eff7ff,#f7fbff_48%,#ffffff)] p-5 shadow-[0_18px_44px_rgba(92,117,155,0.13)]">
@@ -1578,7 +1542,6 @@ function AddPurchasePage({ mode = 'create', activity, purchase, prefill = {}, on
 
   return (
     <PhoneCanvas bottomAction={<PrimaryButton disabled={!canSave} onClick={() => onSave(draft)}>{mode === 'edit' ? '保存修改' : '保存采购'}</PrimaryButton>}>
-      <StatusBar />
       <PageHeader title={pageTitle} onBack={onBack} />
       <section className="mx-5 rounded-[30px] bg-[linear-gradient(145deg,#ffffff_0%,#f7fbff_62%,#f3fff8_100%)] p-5 shadow-[0_18px_44px_rgba(82,98,135,0.13)] ring-1 ring-white/70 backdrop-blur-2xl">
         <div className="flex items-end justify-between gap-4">
@@ -1867,7 +1830,7 @@ function BottomTabs({ activeTab, onChange }) {
 function FloatingCreateButton({ onClick }) {
   return (
     <button
-      className="fixed bottom-[118px] left-1/2 z-40 grid h-[62px] w-[62px] translate-x-[112px] place-items-center rounded-full bg-[#5b5cf6] text-white shadow-[0_16px_34px_rgba(91,92,246,0.3),inset_0_1px_0_rgba(255,255,255,0.3)] ring-1 ring-white/30 transition active:scale-[0.96]"
+      className="fixed bottom-[calc(env(safe-area-inset-bottom)+118px)] left-1/2 z-40 grid h-[62px] w-[62px] translate-x-[112px] place-items-center rounded-full bg-[#5b5cf6] text-white shadow-[0_16px_34px_rgba(91,92,246,0.3),inset_0_1px_0_rgba(255,255,255,0.3)] ring-1 ring-white/30 transition active:scale-[0.96]"
       onClick={onClick}
       aria-label="创建活动"
     >
@@ -2488,4 +2451,95 @@ function PrimaryButton({ children, onClick, disabled = false }) {
   );
 }
 
-createRoot(document.getElementById('root')).render(<App />);
+function ShowcasePage() {
+  return (
+    <main className="min-h-screen overflow-hidden bg-[radial-gradient(circle_at_18%_12%,rgba(234,248,241,0.95),transparent_30%),radial-gradient(circle_at_86%_18%,rgba(238,240,255,0.95),transparent_34%),linear-gradient(135deg,#F9FAFF_0%,#F7F8FA_46%,#F2F0FF_100%)] px-5 py-8 text-[#090E2B]">
+      <section className="mx-auto flex min-h-[calc(100vh-64px)] w-full max-w-[980px] flex-col items-center justify-center gap-8 md:flex-row md:gap-12">
+        <div className="relative shrink-0">
+          <div className="absolute -left-10 top-20 h-44 w-44 rounded-full bg-[#EAF8F1]/70 blur-3xl" />
+          <div className="absolute -right-12 bottom-28 h-56 w-56 rounded-full bg-[#EEF0FF]/90 blur-3xl" />
+          <div className="relative rounded-[56px] bg-[#111827] p-[10px] shadow-[0_38px_90px_rgba(30,41,59,0.22)]">
+            <div className="absolute left-1/2 top-3 z-20 h-7 w-28 -translate-x-1/2 rounded-full bg-[#0b1020]" />
+            <div className="h-[760px] w-[390px] overflow-hidden rounded-[46px] bg-[#F7F8FA]">
+              <ShowcasePhoneScreen />
+            </div>
+          </div>
+        </div>
+
+        <aside className="max-w-[360px] text-center md:text-left">
+          <p className="text-[13px] font-black tracking-[0.18em] text-[#635BFF]">ACTIVITY LEDGER</p>
+          <h1 className="mt-4 text-[38px] font-black leading-[1.05] tracking-[-0.055em] text-[#090E2B] md:text-[48px]">
+            活动经营账本
+          </h1>
+          <p className="mt-4 text-[16px] font-semibold leading-7 text-[#6B7280]">
+            从第一场活动开始，记录收入、采购成本和可复用资产。
+          </p>
+          <div className="mt-7 inline-flex rounded-full bg-white/62 px-5 py-3 text-[14px] font-black text-[#635BFF] shadow-[0_12px_30px_rgba(99,91,255,0.08)] ring-1 ring-white/80 backdrop-blur-2xl">
+            适合活动主理人的轻账本
+          </div>
+        </aside>
+      </section>
+    </main>
+  );
+}
+
+function ShowcasePhoneScreen() {
+  const previewActivity = {
+    id: 'showcase-hotpot',
+    name: '周末火锅局',
+    date: toDateInputValue(new Date()),
+    peopleCount: 10,
+    unitPrice: 288,
+    expectedIncome: 2880,
+    type: { id: 'party', name: '轰趴', icon: '🎉' },
+    status: 'preparing',
+    purchases: [
+      {
+        id: 'showcase-drinks',
+        amount: 216,
+        isReusable: false,
+        isPaid: true,
+        isArrived: true,
+      },
+    ],
+    createdAt: new Date().toISOString(),
+  };
+  const summary = getMonthlySummary([previewActivity], new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+
+  return (
+    <div className="relative min-h-full bg-[#F7F8FA] pb-28 text-[#080d2b]">
+      <StatusBar />
+      <section className="px-7 pt-8">
+        <h2 className="text-[31px] font-black leading-none text-[#080d2b]">活动经营账本</h2>
+      </section>
+      <MonthlyOverviewCard
+        month={formatMonth(new Date())}
+        income={summary.income}
+        cost={summary.cost}
+        profit={summary.profit}
+        onMonthClick={() => {}}
+      />
+      <section className="mt-6">
+        <div className="mb-1 flex w-full items-center gap-1 px-9 text-left">
+          <h3 className="text-[20px] font-black tracking-[-0.04em]">进行中的活动</h3>
+          <ChevronRight size={17} className="text-[#aeb4c3]" strokeWidth={2.5} />
+        </div>
+        <div className="px-5 pt-2">
+          <ActivityBusinessCard activity={previewActivity} onClick={() => {}} />
+        </div>
+      </section>
+      <div className="absolute bottom-[118px] right-5 grid h-[62px] w-[62px] place-items-center rounded-full bg-[#5b5cf6] text-white shadow-[0_16px_34px_rgba(91,92,246,0.3),inset_0_1px_0_rgba(255,255,255,0.3)] ring-1 ring-white/30">
+        <Plus size={31} strokeWidth={2.8} />
+      </div>
+      <div className="absolute bottom-3 left-0 right-0 px-4">
+        <BottomTabs activeTab="home" onChange={() => {}} />
+      </div>
+    </div>
+  );
+}
+
+function RootRouter() {
+  return window.location.pathname === '/showcase' ? <ShowcasePage /> : <App />;
+}
+
+createRoot(document.getElementById('root')).render(<RootRouter />);
